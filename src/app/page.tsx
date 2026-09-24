@@ -45,9 +45,10 @@ export default async function Home() {
 
         <div className="space-y-4">
           {events?.map((event) => (
-            <div
+            <Link
               key={event.id}
-              className="border border-neutral-800 rounded-xl p-5 hover:border-neutral-600 transition-colors"
+              href={`/events/${event.id}`}
+              className="block border border-neutral-800 rounded-xl p-5 hover:border-neutral-600 transition-colors"
             >
               <h2 className="text-lg font-medium">{event.name}</h2>
               <p className="text-sm text-neutral-400 mt-1">
@@ -62,7 +63,7 @@ export default async function Home() {
                   {event.description}
                 </p>
               )}
-            </div>
+            </Link>
           ))}
         </div>
       </div>

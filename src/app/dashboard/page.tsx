@@ -89,7 +89,12 @@ export default async function DashboardPage() {
                   className="border border-neutral-800 rounded-xl p-4 flex items-center justify-between"
                 >
                   <div>
-                    <p className="font-medium">{event.name}</p>
+                    <Link
+                      href={`/dashboard/events/${event.id}`}
+                      className="font-medium hover:underline"
+                    >
+                      {event.name}
+                    </Link>
                     <p className="text-sm text-neutral-500">
                       {event.venue ?? "Venue TBA"} ·{" "}
                       {new Date(event.start_time).toLocaleString("en-NG", {
