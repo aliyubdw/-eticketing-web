@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
     return {
       order_id: order.id,
       ticket_type_id: order.ticket_type_id,
+      qr_token: rawToken,
       qr_token_hash: tokenHash,
       status: "valid" as const,
     };

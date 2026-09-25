@@ -40,15 +40,25 @@ export default async function ManageEventPage({
           <Link href="/dashboard" className="text-sm text-neutral-500 hover:text-neutral-300">
             ← Back to dashboard
           </Link>
-          <h1 className="text-2xl font-semibold mt-2">{event.name}</h1>
-          <p className="text-sm text-neutral-500">
-            {event.venue ?? "Venue TBA"} ·{" "}
-            {new Date(event.start_time).toLocaleString("en-NG", {
-              dateStyle: "medium",
-              timeStyle: "short",
-            })}{" "}
-            · <span className="uppercase">{event.status}</span>
-          </p>
+          <div className="flex items-center justify-between mt-2">
+            <div>
+              <h1 className="text-2xl font-semibold">{event.name}</h1>
+              <p className="text-sm text-neutral-500">
+                {event.venue ?? "Venue TBA"} ·{" "}
+                {new Date(event.start_time).toLocaleString("en-NG", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}{" "}
+                · <span className="uppercase">{event.status}</span>
+              </p>
+            </div>
+            <Link
+              href={`/dashboard/events/${id}/checkin`}
+              className="text-sm rounded-lg border border-neutral-700 px-4 py-2 hover:border-neutral-500 transition-colors whitespace-nowrap"
+            >
+              Check-in scanner
+            </Link>
+          </div>
         </div>
 
         <section className="space-y-4">
