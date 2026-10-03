@@ -2,98 +2,65 @@ import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 
-// Service-role client: bypasses RLS. Never expose this key to the browser.
 function adminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  );
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
 }
 
 export async function POST(req: NextRequest) {
   const secret = process.env.PAYSTACK_SECRET_KEY;
   const bodyText = await req.text();
-
-  // Verify the webhook actually came from Paystack
   const signature = req.headers.get("x-paystack-signature");
   const expected = crypto.createHmac("sha512", secret ?? "").update(bodyText).digest("hex");
 
-  if (!secret || signature !== expected) {
+  if (!secret || !signature || signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  const event = JSON.parse(bodyText);
+  let event: any;
+  try { event = JSON.parse(bodyText); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+  if (event.event !== "charge.success") return NextResponse.json({ received: true });
 
-  if (event.event !== "charge.success") {
-    // Ignore all other event types
-    return NextResponse.json({ received: true });
-  }
+  const reference = String(event.data?.reference ?? "");
+  if (!reference) return NextResponse.json({ error: "Missing payment reference" }, { status: 400 });
 
-  const orderId = event.data.reference;
+  const amount = Number(event.data?.amount);
+  if (!Number.isFinite(amount)) return NextResponse.json({ error: "Invalid payment amount" }, { status: 400 });
+
   const supabase = adminClient();
-
-  // Idempotency: if this order's payment is already succeeded, do nothing
-  const { data: existingPayment } = await supabase
-    .from("payments")
-    .select("id, status")
-    .eq("order_id", orderId)
-    .single();
-
-  if (!existingPayment || existingPayment.status === "succeeded") {
-    return NextResponse.json({ received: true });
-  }
-
-  const { data: order } = await supabase
+  const { data: order, error: orderError } = await supabase
     .from("orders")
-    .select("id, ticket_type_id, quantity, status")
-    .eq("id", orderId)
-    .single();
+    .select("id, ticket_type_id, quantity, total_amount, currency, status")
+    .eq("id", reference)
+    .maybeSingle();
 
-  if (!order || order.status !== "pending") {
+  if (orderError || !order || order.status === "paid" || order.status !== "pending") {
     return NextResponse.json({ received: true });
   }
 
-  // Mark payment succeeded
-  await supabase
-    .from("payments")
-    .update({
-      status: "succeeded",
-      provider_reference: event.data.id?.toString(),
-      raw_webhook_payload: event,
-    })
-    .eq("order_id", orderId);
+  if (amount !== Math.round(Number(order.total_amount) * 100)) {
+    return NextResponse.json({ error: "Payment amount mismatch" }, { status: 400 });
+  }
 
-  // Mark order paid
-  await supabase.from("orders").update({ status: "paid" }).eq("id", orderId);
-
-  // Issue tickets: one row per quantity, each with a unique hashed QR token
-  const ticketRows = Array.from({ length: order.quantity }).map(() => {
+  const providerReference = String(event.data?.id ?? event.data?.reference ?? reference);
+  const ticketRows = Array.from({ length: order.quantity }, () => {
     const rawToken = crypto.randomBytes(24).toString("hex");
-    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
     return {
-      order_id: order.id,
-      ticket_type_id: order.ticket_type_id,
       qr_token: rawToken,
-      qr_token_hash: tokenHash,
-      status: "valid" as const,
+      qr_token_hash: crypto.createHash("sha256").update(rawToken).digest("hex"),
+      status: "valid",
     };
   });
 
-  await supabase.from("tickets").insert(ticketRows);
+  const { error: finalizeError } = await supabase.rpc("finalize_paystack_order", {
+    p_order_id: order.id,
+    p_provider_reference: providerReference,
+    p_webhook_payload: event,
+    p_ticket_rows: ticketRows,
+  });
 
-  // Increment sold_count on the ticket type
-  const { data: ticketType } = await supabase
-    .from("ticket_types")
-    .select("sold_count")
-    .eq("id", order.ticket_type_id)
-    .single();
-
-  if (ticketType) {
-    await supabase
-      .from("ticket_types")
-      .update({ sold_count: ticketType.sold_count + order.quantity })
-      .eq("id", order.ticket_type_id);
+  if (finalizeError) {
+    console.error("Paystack finalization failed:", finalizeError);
+    return NextResponse.json({ error: "Payment received but ticket finalization failed" }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });
